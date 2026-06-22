@@ -13,9 +13,9 @@ Claude Flow V3 is a next-generation AI agent coordination system built on 10 Arc
 
 V3 represents a complete architectural overhaul:
 - **10x faster testing** with Vitest
-- **150x-12,500x faster search** with HNSW indexing
-- **2.49x-7.47x Flash Attention speedup**
-- **50-75% memory reduction**
+- **Measured ~1.9x–4.7x faster search** with HNSW indexing vs brute force above the crossover (recall@10 ~0.99). The earlier "150x-12,500x" figure was a brute-force-fallback artifact and is not reproducible — see the [intelligence-system audit](../docs/reviews/intelligence-system-audit-2026-05-29.md).
+- **Flash Attention** — speedup currently **unverified** (no benchmark exists; the "2.49x-7.47x" figure is a target, not a measurement)
+- **50-75% memory reduction** (target)
 
 ## Features
 
@@ -43,8 +43,8 @@ V3 represents a complete architectural overhaul:
 | Event Bus (100k events) | <50ms | ~6ms |
 | Map Lookup (100k gets) | <20ms | ~16ms |
 | Array.find vs Map O(1) | N/A | 978x speedup |
-| Flash Attention | 2.49x-7.47x | Validated |
-| AgentDB Search | 150x-12,500x | HNSW indexed |
+| Flash Attention | 2.49x-7.47x (target) | Unverified — no benchmark exists |
+| AgentDB Search | ~1.9x–4.7x vs brute force | Measured (ruvector NAPI; 150x-12,500x not reproduced) |
 
 ## Architecture
 
@@ -219,7 +219,7 @@ const valid = await hasher.verify('password', hash);
 ```
 
 ### @claude-flow/memory
-Unified memory service with AgentDB, HNSW indexing, and 150x-12,500x faster search.
+Unified memory service with AgentDB and HNSW indexing — measured ~1.9x–4.7x faster than brute force above the crossover (recall@10 ~0.99). The earlier "150x-12,500x" claim was not reproducible (see the [audit](../docs/reviews/intelligence-system-audit-2026-05-29.md)).
 
 ```typescript
 import { HybridMemoryRepository, HNSWIndex } from '@claude-flow/memory';
@@ -434,11 +434,13 @@ pnpm test:coverage
 
 ## Performance Targets
 
-| Category | Metric | Target |
-|----------|--------|--------|
-| **Search** | AgentDB HNSW | 150x-12,500x faster |
-| **Attention** | Flash Attention | 2.49x-7.47x speedup |
-| **Memory** | Reduction | 50-75% |
+> Numbers are measured unless marked "target". Source of truth: [intelligence-system audit](../docs/reviews/intelligence-system-audit-2026-05-29.md) + [`scripts/benchmark-intelligence.mjs`](../scripts/benchmark-intelligence.mjs).
+
+| Category | Metric | Measured / Target |
+|----------|--------|-------------------|
+| **Search** | AgentDB HNSW | ~1.9x–4.7x vs brute force above crossover (measured; 150x-12,500x not reproduced) |
+| **Attention** | Flash Attention | 2.49x-7.47x (target — unverified, no benchmark) |
+| **Memory** | Reduction | 50-75% (target) |
 | **Code** | Total lines | <5,000 |
 | **Startup** | Cold start | <500ms |
 | **Learning** | SONA adaptation | <0.05ms |
