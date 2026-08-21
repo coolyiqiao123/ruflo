@@ -232,11 +232,25 @@ function maxSeverity(a: InjectionSeverity | 'none', b: InjectionSeverity): Injec
 
 export class ToolOutputGuardrail {
   private readonly patterns: ReadonlyArray<typeof BUILTIN_PATTERNS[number]>;
+  private readonly compiled: ReadonlyArray<{
+    label: string;
+    re: RegExp;
+    severity: InjectionSeverity;
+    category: InjectionCategory;
+  }>;
   private readonly policy: Required<NonNullable<GuardrailConfig['policy']>>;
   private readonly maxScanBytes: number;
 
   constructor(config: GuardrailConfig = {}) {
     this.patterns = [...BUILTIN_PATTERNS, ...(config.customPatterns ?? [])];
+    // Compile each pattern once with the global flag. Built-in patterns are
+    // immutable; user-supplied patterns are also defensively cloned.
+    this.compiled = this.patterns.map(({ label, regex, severity, category }) => ({
+      label,
+      severity,
+      category,
+      re: new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : regex.flags + 'g'),
+    }));
     this.policy = { ...DEFAULT_POLICY, ...(config.policy ?? {}) };
     this.maxScanBytes = config.maxScanBytes ?? DEFAULT_MAX_SCAN_BYTES;
   }
@@ -265,11 +279,9 @@ export class ToolOutputGuardrail {
       });
     }
 
-    for (const { label, regex, severity, category } of this.patterns) {
-      // Clone the RegExp so that the global-flag lastIndex state doesn't
-      // leak between calls. Built-in patterns are immutable; user-supplied
-      // patterns are also defensively cloned.
-      const re = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : regex.flags + 'g');
+    for (const { label, re, severity, category } of this.compiled) {
+      // Reset lastIndex so the global-flag state doesn't leak between calls.
+      re.lastIndex = 0;
       let match: RegExpExecArray | null;
       while ((match = re.exec(scanned)) !== null) {
         findings.push({
@@ -337,9 +349,9 @@ export class ToolOutputGuardrail {
     );
 
     let out = content;
-    for (const { label, regex } of this.patterns) {
+    for (const { label, re } of this.compiled) {
       if (!labels.has(label)) continue;
-      const re = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : regex.flags + 'g');
+      re.lastIndex = 0;
       out = out.replace(re, `[REDACTED:${label}]`);
     }
     return out;

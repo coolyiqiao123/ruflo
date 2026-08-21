@@ -130,44 +130,37 @@ async function getSystemStatus(): Promise<{
   };
 }> {
   try {
-    // Get swarm status
-    const swarmStatus = await callMCPTool<{
-      swarmId: string;
-      topology: string;
-      agents: { total: number; active: number; idle: number; terminated: number };
-      health: string;
-      uptime: number;
-    }>('swarm_status', { includeMetrics: true });
-
-    // Get MCP status
-    let mcpStatus = { running: false, port: null as number | null, transport: 'stdio' };
-    try {
-      const mcp = await callMCPTool<{
+    // Get swarm, MCP, memory, and task status concurrently
+    const [swarmStatus, mcpStatus, memoryStatus, taskStatus] = await Promise.all([
+      callMCPTool<{
+        swarmId: string;
+        topology: string;
+        agents: { total: number; active: number; idle: number; terminated: number };
+        health: string;
+        uptime: number;
+      }>('swarm_status', { includeMetrics: true }),
+      callMCPTool<{
         running: boolean;
-        port: number;
+        port: number | null;
         transport: string;
-      }>('mcp_status', {});
-      mcpStatus = mcp;
-    } catch {
-      // MCP not running
-    }
-
-    // Get memory status
-    const memoryStatus = await callMCPTool<{
-      entries: number;
-      size: number;
-      backend: string;
-      performance: { avgSearchTime: number; cacheHitRate: number };
-    }>('memory_stats', {});
-
-    // Get task status
-    const taskStatus = await callMCPTool<{
-      total: number;
-      pending: number;
-      running: number;
-      completed: number;
-      failed: number;
-    }>('task_summary', {});
+      }>('mcp_status', {}).catch(
+        // MCP not running
+        () => ({ running: false, port: null as number | null, transport: 'stdio' })
+      ),
+      callMCPTool<{
+        entries: number;
+        size: number;
+        backend: string;
+        performance: { avgSearchTime: number; cacheHitRate: number };
+      }>('memory_stats', {}),
+      callMCPTool<{
+        total: number;
+        pending: number;
+        running: number;
+        completed: number;
+        failed: number;
+      }>('task_summary', {})
+    ]);
 
     return {
       initialized: true,
