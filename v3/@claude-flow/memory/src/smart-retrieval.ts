@@ -260,12 +260,13 @@ function mmrRerank(scored: Scored[], lambda: number, limit: number): Scored[] {
 
   const selected: Scored[] = [];
   const remaining = [...scored];
+  const remainingTokens = remaining.map((s) => tokenize(s.candidate.content));
   const selectedTokens: Set<string>[] = [];
 
   // Seed with the top-scored candidate.
   const first = remaining.shift()!;
   selected.push(first);
-  selectedTokens.push(tokenize(first.candidate.content));
+  selectedTokens.push(remainingTokens.shift()!);
 
   while (selected.length < limit && remaining.length > 0) {
     let bestIdx = -1;
@@ -273,7 +274,7 @@ function mmrRerank(scored: Scored[], lambda: number, limit: number): Scored[] {
 
     for (let i = 0; i < remaining.length; i++) {
       const cand = remaining[i];
-      const candTokens = tokenize(cand.candidate.content);
+      const candTokens = remainingTokens[i];
       let maxOverlap = 0;
       for (const selTokens of selectedTokens) {
         const sim = jaccard(candTokens, selTokens);
@@ -288,8 +289,9 @@ function mmrRerank(scored: Scored[], lambda: number, limit: number): Scored[] {
 
     if (bestIdx < 0) break;
     const [chosen] = remaining.splice(bestIdx, 1);
+    const [chosenTokens] = remainingTokens.splice(bestIdx, 1);
     selected.push(chosen);
-    selectedTokens.push(tokenize(chosen.candidate.content));
+    selectedTokens.push(chosenTokens);
   }
 
   return selected;
@@ -395,15 +397,19 @@ export async function smartSearch(
   const variants = multiQuery ? expander(opts.query) : [opts.query];
   if (variants.length === 0) variants.push(opts.query);
 
+  const responses = await Promise.all(
+    variants.map((v) =>
+      search({
+        query: v,
+        namespace: opts.namespace,
+        limit: fanOutK,
+        threshold,
+      })
+    )
+  );
   const ranked: SearchCandidate[][] = [];
   let totalRaw = 0;
-  for (const v of variants) {
-    const resp = await search({
-      query: v,
-      namespace: opts.namespace,
-      limit: fanOutK,
-      threshold,
-    });
+  for (const resp of responses) {
     ranked.push(resp.results);
     totalRaw += resp.results.length;
   }

@@ -961,6 +961,7 @@ class RealEmbeddingService implements IEmbeddingService {
 class FallbackEmbeddingService implements IEmbeddingService {
   private dimensions: number;
   private cache: Map<string, Float32Array> = new Map();
+  private onnxUnavailable = false;
 
   constructor(dimensions: number = 384) {
     this.dimensions = dimensions;
@@ -970,6 +971,10 @@ class FallbackEmbeddingService implements IEmbeddingService {
     const cacheKey = text.slice(0, 200);
     if (this.cache.has(cacheKey)) {
       return this.cache.get(cacheKey)!;
+    }
+
+    if (this.onnxUnavailable) {
+      return this.hashEmbed(text);
     }
 
     // Try agentic-flow ONNX embeddings first
@@ -989,6 +994,7 @@ class FallbackEmbeddingService implements IEmbeddingService {
       return embedding;
     } catch {
       // Fallback to hash-based embedding
+      this.onnxUnavailable = true;
       return this.hashEmbed(text);
     }
   }

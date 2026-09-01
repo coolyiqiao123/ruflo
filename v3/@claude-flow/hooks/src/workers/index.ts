@@ -905,13 +905,14 @@ export class WorkerManager extends EventEmitter {
 
     metrics.status = 'running';
     const startTime = Date.now();
+    let timeoutTimer: NodeJS.Timeout | undefined;
 
     try {
       const result = await Promise.race([
         handler(),
-        new Promise<WorkerResult>((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout')), config.timeout)
-        ),
+        new Promise<WorkerResult>((_, reject) => {
+          timeoutTimer = setTimeout(() => reject(new Error('Timeout')), config.timeout);
+        }),
       ]);
 
       const duration = Date.now() - startTime;
@@ -949,6 +950,10 @@ export class WorkerManager extends EventEmitter {
       this.emit('worker:error', { name, error, duration });
 
       return result;
+    } finally {
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+      }
     }
   }
 
@@ -1750,12 +1755,13 @@ async function searchDDDPatterns(srcPath: string): Promise<Record<string, number
   return patterns;
 }
 
-async function collectFiles(dir: string, ext: string, depth = 0): Promise<string[]> {
+async function collectFiles(dir: string, ext: string | string[], depth = 0): Promise<string[]> {
   // Security: Prevent infinite recursion
   if (depth > MAX_RECURSION_DEPTH) {
     return [];
   }
 
+  const exts = Array.isArray(ext) ? ext : [ext];
   const files: string[] = [];
 
   try {
@@ -1772,7 +1778,7 @@ async function collectFiles(dir: string, ext: string, depth = 0): Promise<string
       if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
         const subFiles = await collectFiles(fullPath, ext, depth + 1);
         files.push(...subFiles);
-      } else if (entry.isFile() && entry.name.endsWith(ext)) {
+      } else if (entry.isFile() && exts.some(e => entry.name.endsWith(e))) {
         files.push(fullPath);
       }
     }
@@ -1792,28 +1798,32 @@ async function scanDirectoryForPatterns(
   let vulnerabilities = 0;
 
   try {
-    const files = await collectFiles(dir, '.ts');
-    files.push(...await collectFiles(dir, '.js'));
+    // Skip test files and node_modules
+    const files = (await collectFiles(dir, ['.ts', '.js'])).filter(
+      file => !file.includes('node_modules') && !file.includes('.test.') && !file.includes('.spec.')
+    );
 
-    for (const file of files) {
-      // Skip test files and node_modules
-      if (file.includes('node_modules') || file.includes('.test.') || file.includes('.spec.')) {
-        continue;
-      }
+    // Process files in batches for better I/O performance
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < files.length; i += BATCH_SIZE) {
+      const batch = files.slice(i, i + BATCH_SIZE);
+      const contents = await Promise.all(
+        batch.map(file => fs.readFile(file, 'utf-8'))
+      );
 
-      const content = await fs.readFile(file, 'utf-8');
-
-      for (const pattern of secretPatterns) {
-        const matches = content.match(pattern);
-        if (matches) {
-          secrets += matches.length;
+      for (const content of contents) {
+        for (const pattern of secretPatterns) {
+          const matches = content.match(pattern);
+          if (matches) {
+            secrets += matches.length;
+          }
         }
-      }
 
-      for (const pattern of vulnPatterns) {
-        const matches = content.match(pattern);
-        if (matches) {
-          vulnerabilities += matches.length;
+        for (const pattern of vulnPatterns) {
+          const matches = content.match(pattern);
+          if (matches) {
+            vulnerabilities += matches.length;
+          }
         }
       }
     }

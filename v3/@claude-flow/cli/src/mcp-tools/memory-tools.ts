@@ -249,14 +249,19 @@ async function getMemoryFunctions() {
  * #1606: Wrapped in try/catch to prevent process-level crashes that kill
  * the stdio MCP transport on Windows/Codex.
  */
+let _ensuredOnce = false;
+
 async function ensureInitialized(): Promise<void> {
+  if (_ensuredOnce && !hasLegacyStore()) return;
   try {
     const { initializeMemoryDatabase, checkMemoryInitialization, storeEntry } = await getMemoryFunctions();
 
     // Check if already initialized
     const status = await checkMemoryInitialization();
-    if (!status.initialized) {
-      await initializeMemoryDatabase({ force: false, verbose: false });
+    let initialized = status.initialized;
+    if (!initialized) {
+      const initResult = await initializeMemoryDatabase({ force: false, verbose: false });
+      initialized = initResult.success;
     }
 
     // Migrate legacy JSON data if exists (from old .claude-flow/memory/ location)
@@ -285,6 +290,8 @@ async function ensureInitialized(): Promise<void> {
         markMigrationComplete();
       }
     }
+
+    _ensuredOnce = initialized;
   } catch (error) {
     console.error('[MCP Memory] Initialization failed:', error instanceof Error ? error.message : error);
   }

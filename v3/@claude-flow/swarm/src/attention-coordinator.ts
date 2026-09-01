@@ -179,6 +179,7 @@ const DEFAULT_CONFIG: AttentionCoordinatorConfig = {
  */
 export class AttentionCoordinator extends EventEmitter {
   private config: AttentionCoordinatorConfig;
+  private embeddingCache = new WeakMap<AgentOutput, Float32Array>();
   private performanceStats = {
     totalCoordinations: 0,
     totalLatency: 0,
@@ -763,6 +764,11 @@ export class AttentionCoordinator extends EventEmitter {
         : new Float32Array(output.embedding);
     }
 
+    const cached = this.embeddingCache.get(output);
+    if (cached) {
+      return cached;
+    }
+
     // Create hash-based embedding from content
     const content = typeof output.content === 'string'
       ? output.content
@@ -783,6 +789,8 @@ export class AttentionCoordinator extends EventEmitter {
         embedding[i] /= norm;
       }
     }
+
+    this.embeddingCache.set(output, embedding);
 
     return embedding;
   }
