@@ -37,13 +37,15 @@ All ADRs are located in [`/v3/implementation/adrs/`](../../implementation/adrs/)
 
 ## Performance Targets
 
-| Metric | Target | Status |
-|--------|--------|--------|
-| HNSW Search | 150x-12,500x faster | ✅ Achieved |
-| Flash Attention | 2.49x-7.47x speedup | ✅ Achieved (alpha.102) |
-| Memory Reduction | 50-75% | ✅ Achieved |
-| MCP Response | <100ms | ✅ Achieved |
-| CLI Startup | <500ms | ✅ Achieved |
+> Source of truth: [`docs/reviews/intelligence-system-audit-2026-05-29.md`](../../../docs/reviews/intelligence-system-audit-2026-05-29.md) + [`scripts/benchmark-intelligence.mjs`](../../../scripts/benchmark-intelligence.mjs). Numbers are measured unless marked "target/unverified". The earlier "150x-12,500x" and "Flash Attention 2.49x-7.47x ✅ Achieved" entries were not reproducible and have been corrected per the audit.
+
+| Metric | Measured / Target | Status |
+|--------|-------------------|--------|
+| HNSW Search | ~1.9x at N=20k, ~3.2x–4.7x at N=5k vs brute force (recall@10 ~0.99) | **Measured** (ruvector NAPI; 150x-12,500x NOT reproduced) |
+| Flash Attention | 2.49x-7.47x | **Unverified** (no benchmark exists) |
+| Memory Reduction | 50-75% | target |
+| MCP Response | <100ms | target |
+| CLI Startup | <500ms | target |
 
 ## Neural Features (alpha.102+)
 

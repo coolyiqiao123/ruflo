@@ -5560,7 +5560,7 @@ SELECT cosine_similarity_arr(a, b) AS similarity;
 | **AI Operations** | External only | **In-database (attention, GNN)** |
 
 <details>
-<summary>⚡ <strong>@ruvector/attention</strong> — Flash Attention (2.49x-7.47x Speedup)</summary>
+<summary>⚡ <strong>@ruvector/attention</strong> — Flash Attention (2.49x-7.47x target — speedup currently unverified, no benchmark exists)</summary>
 
 Native Rust implementation of Flash Attention for transformer computations:
 
