@@ -262,7 +262,7 @@ export class ReasoningBank {
       return [];
     }
 
-    let candidates: Array<{ entry: MemoryEntry; relevance: number }> = [];
+    let candidates: Array<{ entry: MemoryEntry; relevance: number; maxSim: number }> = [];
     let usedHnsw = false;
 
     // Try AgentDB HNSW search first
@@ -272,9 +272,9 @@ export class ReasoningBank {
         candidates = results
           .map(r => {
             const entry = this.memories.get(r.id);
-            return entry ? { entry, relevance: r.similarity } : null;
+            return entry ? { entry, relevance: r.similarity, maxSim: 0 } : null;
           })
-          .filter((c): c is { entry: MemoryEntry; relevance: number } => c !== null);
+          .filter((c): c is { entry: MemoryEntry; relevance: number; maxSim: number } => c !== null);
         if (candidates.length > 0) usedHnsw = true;
       } catch {
         // Fall through to brute-force
@@ -285,7 +285,7 @@ export class ReasoningBank {
     if (candidates.length === 0) {
       for (const entry of this.memories.values()) {
         const relevance = this.cosineSimilarity(queryEmbedding, entry.memory.embedding);
-        candidates.push({ entry, relevance });
+        candidates.push({ entry, relevance, maxSim: 0 });
       }
       candidates.sort((a, b) => b.relevance - a.relevance);
     }
@@ -308,17 +308,16 @@ export class ReasoningBank {
 
         // Compute MMR score: lambda * relevance - (1 - lambda) * max_similarity_to_selected
         const relevance = candidate.relevance;
-        let maxSimilarity = 0;
 
-        for (const sel of selected) {
+        if (selected.length > 0) {
           const sim = this.cosineSimilarity(
             candidate.entry.memory.embedding,
-            sel.memory.embedding
+            selected[selected.length - 1].memory.embedding
           );
-          maxSimilarity = Math.max(maxSimilarity, sim);
+          candidate.maxSim = Math.max(candidate.maxSim, sim);
         }
 
-        const diversityScore = 1 - maxSimilarity;
+        const diversityScore = 1 - candidate.maxSim;
         const mmrScore = this.config.mmrLambda * relevance +
           (1 - this.config.mmrLambda) * diversityScore;
 
@@ -334,7 +333,7 @@ export class ReasoningBank {
       results.push({
         memory: best.entry.memory,
         relevanceScore: best.relevance,
-        diversityScore: 1 - this.computeMaxSimilarity(best.entry, selected.slice(0, -1)),
+        diversityScore: 1 - best.maxSim,
         combinedScore: bestScore,
       });
 

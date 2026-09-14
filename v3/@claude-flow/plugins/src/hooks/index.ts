@@ -205,14 +205,16 @@ export class HookRegistry extends EventEmitter {
     entry.executionCount++;
     entry.lastExecuted = new Date();
 
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
     try {
       const timeout = this.config.defaultTimeout ?? 30000;
 
       const result = await Promise.race([
         entry.hook.handler(context),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Hook execution timeout')), timeout)
-        ),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Hook execution timeout')), timeout);
+        }),
       ]);
 
       const duration = Date.now() - startTime;
@@ -231,6 +233,8 @@ export class HookRegistry extends EventEmitter {
         success: false,
         error: entry.lastError,
       };
+    } finally {
+      clearTimeout(timer);
     }
   }
 

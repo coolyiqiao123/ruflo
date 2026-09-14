@@ -138,14 +138,14 @@ export class AgentDBBackend implements MemoryBackend {
 
     // Calculate cosine similarity
     const scored = withEmbeddings.map(memory => ({
-      ...memory,
+      memory,
       similarity: this.cosineSimilarity(embedding, memory.embedding!)
     }));
 
     // Sort by similarity and take top k
     scored.sort((a, b) => b.similarity - a.similarity);
 
-    return scored.slice(0, k);
+    return scored.slice(0, k).map(({ memory, similarity }) => ({ ...memory, similarity }));
   }
 
   /**

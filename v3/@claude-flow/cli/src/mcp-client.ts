@@ -92,8 +92,14 @@ function registerTools(tools: MCPTool[]): void {
   });
 }
 
-// Initialize registry with all available tools
-registerTools([
+// Initialize registry with all available tools. Deferred to first registry
+// access so the agent-browser availability probe (a synchronous child-process
+// spawn in getBrowserTools) stays off the CLI startup critical path.
+let _registryInitialized = false;
+function ensureRegistryInitialized(): void {
+  if (_registryInitialized) return;
+  _registryInitialized = true;
+  registerTools([
   ...agentTools,
   ...swarmTools,
   ...memoryTools,
@@ -134,7 +140,8 @@ registerTools([
   ...coverageRouterTools,
   // ADR-150 — MetaHarness static-analysis tools (5)
   ...metaharnessTools,
-]);
+  ]);
+}
 
 /**
  * MCP Client Error
@@ -179,6 +186,7 @@ export async function callMCPTool<T = unknown>(
   input: Record<string, unknown> = {},
   context?: Record<string, unknown>
 ): Promise<T> {
+  ensureRegistryInitialized();
   // Look up tool in registry
   const tool = TOOL_REGISTRY.get(toolName);
 
@@ -278,6 +286,7 @@ function applyContentBoundaryGuardrail(toolName: string, result: unknown): unkno
  * @returns Tool metadata or undefined if not found
  */
 export function getToolMetadata(toolName: string): Omit<MCPTool, 'handler'> | undefined {
+  ensureRegistryInitialized();
   const tool = TOOL_REGISTRY.get(toolName);
 
   if (!tool) {
@@ -304,6 +313,7 @@ export function getToolMetadata(toolName: string): Omit<MCPTool, 'handler'> | un
  * @returns Array of tool metadata
  */
 export function listMCPTools(category?: string): Array<Omit<MCPTool, 'handler'>> {
+  ensureRegistryInitialized();
   const tools = Array.from(TOOL_REGISTRY.values());
 
   const filtered = category
@@ -329,6 +339,7 @@ export function listMCPTools(category?: string): Array<Omit<MCPTool, 'handler'>>
  * @returns True if tool exists
  */
 export function hasTool(toolName: string): boolean {
+  ensureRegistryInitialized();
   return TOOL_REGISTRY.has(toolName);
 }
 
@@ -338,6 +349,7 @@ export function hasTool(toolName: string): boolean {
  * @returns Array of unique categories
  */
 export function getToolCategories(): string[] {
+  ensureRegistryInitialized();
   const categories = new Set<string>();
 
   TOOL_REGISTRY.forEach(tool => {
@@ -360,6 +372,7 @@ export function validateToolInput(
   toolName: string,
   input: Record<string, unknown>
 ): { valid: boolean; errors?: string[] } {
+  ensureRegistryInitialized();
   const tool = TOOL_REGISTRY.get(toolName);
 
   if (!tool) {

@@ -238,12 +238,14 @@ export async function benchmark(
 
   // Warmup phase
   for (let i = 0; i < warmup; i++) {
+    let timer: NodeJS.Timeout | undefined;
     await Promise.race([
       fn(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Warmup timeout')), timeout)
-      ),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Warmup timeout')), timeout);
+      }),
     ]).catch(() => {});
+    clearTimeout(timer);
   }
 
   // Auto-calibrate iterations if needed
@@ -269,12 +271,17 @@ export async function benchmark(
 
     const iterStart = performance.now();
 
-    await Promise.race([
-      fn(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Iteration timeout')), timeout)
-      ),
-    ]);
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        fn(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Iteration timeout')), timeout);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
 
     const iterEnd = performance.now();
     times.push(iterEnd - iterStart);

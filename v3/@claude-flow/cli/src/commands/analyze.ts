@@ -335,39 +335,43 @@ const codeCommand: Command = {
 
       const fileStats: Array<{ file: string; loc: number; todos: number; functions: number; imports: number; maxNesting: number; securityIssues: string[] }> = [];
 
-      for (const filePath of files) {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const lines = content.split('\n');
-        const nonEmpty = lines.filter(l => l.trim().length > 0 && !/^\s*(\/\/|\/\*|\*\s|#)/.test(l)).length;
-        const todos = (content.match(/\b(TODO|FIXME|HACK|XXX)\b/gi) || []).length;
-        const fns = (content.match(/(?:export\s+)?(?:async\s+)?function\s+\w+|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?\([^)]*\)\s*=>/g) || []).length;
-        const imps = (content.match(/^import\s+/gm) || []).length + (content.match(/require\s*\(/g) || []).length;
+      for (let i = 0; i < files.length; i += 32) {
+        const chunk = files.slice(i, i + 32);
+        const chunkStats = await Promise.all(chunk.map(async (filePath) => {
+          const content = await fs.readFile(filePath, 'utf-8');
+          const lines = content.split('\n');
+          const nonEmpty = lines.filter(l => l.trim().length > 0 && !/^\s*(\/\/|\/\*|\*\s|#)/.test(l)).length;
+          const todos = (content.match(/\b(TODO|FIXME|HACK|XXX)\b/gi) || []).length;
+          const fns = (content.match(/(?:export\s+)?(?:async\s+)?function\s+\w+|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?\([^)]*\)\s*=>/g) || []).length;
+          const imps = (content.match(/^import\s+/gm) || []).length + (content.match(/require\s*\(/g) || []).length;
 
-        let maxNesting = 0;
-        let nesting = 0;
-        for (const line of lines) {
-          nesting += (line.match(/\{/g) || []).length;
-          nesting -= (line.match(/\}/g) || []).length;
-          if (nesting > maxNesting) maxNesting = nesting;
-        }
+          let maxNesting = 0;
+          let nesting = 0;
+          for (const line of lines) {
+            nesting += (line.match(/\{/g) || []).length;
+            nesting -= (line.match(/\}/g) || []).length;
+            if (nesting > maxNesting) maxNesting = nesting;
+          }
 
-        const securityIssues: string[] = [];
-        if (/\beval\s*\(/.test(content)) securityIssues.push('eval()');
-        if (/\bexec\s*\(/.test(content)) securityIssues.push('exec()');
-        if (/\.innerHTML\s*=/.test(content)) securityIssues.push('innerHTML');
-        if (/dangerouslySetInnerHTML/.test(content)) securityIssues.push('dangerouslySetInnerHTML');
-        if (/['"](?:password|secret|api[_-]?key|token)\s*[:=]\s*['"][^'"]{3,}['"]/i.test(content)) securityIssues.push('hardcoded secret');
-        if (/new\s+Function\s*\(/.test(content)) securityIssues.push('new Function()');
+          const securityIssues: string[] = [];
+          if (/\beval\s*\(/.test(content)) securityIssues.push('eval()');
+          if (/\bexec\s*\(/.test(content)) securityIssues.push('exec()');
+          if (/\.innerHTML\s*=/.test(content)) securityIssues.push('innerHTML');
+          if (/dangerouslySetInnerHTML/.test(content)) securityIssues.push('dangerouslySetInnerHTML');
+          if (/['"](?:password|secret|api[_-]?key|token)\s*[:=]\s*['"][^'"]{3,}['"]/i.test(content)) securityIssues.push('hardcoded secret');
+          if (/new\s+Function\s*\(/.test(content)) securityIssues.push('new Function()');
 
-        fileStats.push({
-          file: filePath,
-          loc: nonEmpty,
-          todos,
-          functions: fns,
-          imports: imps,
-          maxNesting,
-          securityIssues,
-        });
+          return {
+            file: filePath,
+            loc: nonEmpty,
+            todos,
+            functions: fns,
+            imports: imps,
+            maxNesting,
+            securityIssues,
+          };
+        }));
+        fileStats.push(...chunkStats);
       }
 
       spinner.stop();
@@ -1460,7 +1464,7 @@ const depsCommand: Command = {
         const outdated: Array<{ name: string; declared: string; installed: string; category: string }> = [];
 
         const checkDeps = async (entries: [string, string][], category: string) => {
-          for (const [name, declared] of entries) {
+          const rows = await Promise.all(entries.map(async ([name, declared]) => {
             try {
               const installedPkg = resolve('node_modules', name, 'package.json');
               const raw = await fs.readFile(installedPkg, 'utf-8');
@@ -1468,11 +1472,15 @@ const depsCommand: Command = {
               const installed = installedContent.version || 'unknown';
               const cleanDeclared = (declared as string).replace(/^[\^~>=<]+/, '');
               if (installed !== cleanDeclared) {
-                outdated.push({ name, declared: declared as string, installed, category });
+                return { name, declared: declared as string, installed, category };
               }
+              return null;
             } catch {
-              outdated.push({ name, declared: declared as string, installed: 'not installed', category });
+              return { name, declared: declared as string, installed: 'not installed', category };
             }
+          }));
+          for (const row of rows) {
+            if (row) outdated.push(row);
           }
         };
 
@@ -2025,10 +2033,17 @@ const dependenciesCommand: Command = {
       output.writeln(output.bold('Most Connected Files'));
       output.writeln();
 
+      const degreeById = new Map<string, number>();
+      for (const e of graph.edges) {
+        degreeById.set(e.source, (degreeById.get(e.source) ?? 0) + 1);
+        if (e.target !== e.source) {
+          degreeById.set(e.target, (degreeById.get(e.target) ?? 0) + 1);
+        }
+      }
       const nodesByDegree = Array.from(graph.nodes.values())
         .map(n => ({
           ...n,
-          degree: graph.edges.filter(e => e.source === n.id || e.target === n.id).length,
+          degree: degreeById.get(n.id) ?? 0,
         }))
         .sort((a, b) => b.degree - a.degree)
         .slice(0, 10);
