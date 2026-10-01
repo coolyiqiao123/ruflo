@@ -1177,7 +1177,7 @@ export async function ensureSchemaColumns(dbPath: string): Promise<{
     if (columnsAdded.includes('status') || existingColumns.has('status')) {
       try {
         db.run(`UPDATE memory_entries SET status = 'active' WHERE status IS NULL`);
-        modified = true;
+        if (db.getRowsModified() > 0) modified = true;
       } catch {
         /* table is read-only or doesn't exist — skip */
       }

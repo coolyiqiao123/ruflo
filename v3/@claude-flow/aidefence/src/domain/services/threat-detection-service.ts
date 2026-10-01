@@ -286,11 +286,15 @@ export class ThreatDetectionService {
     const normalizedInput = this.normalizeInput(input);
 
     // Pattern matching
+    let threatIndicatorCount = -1;
     for (const pattern of this.patterns) {
       const match = pattern.pattern.exec(normalizedInput);
       if (match) {
+        if (threatIndicatorCount < 0) {
+          threatIndicatorCount = this.patterns.filter(p => p.pattern.test(normalizedInput)).length;
+        }
         // Calculate confidence with context
-        const confidence = this.calculateConfidence(pattern, match, normalizedInput);
+        const confidence = this.calculateConfidence(pattern, match, normalizedInput, threatIndicatorCount);
 
         threats.push(createThreat({
           type: pattern.type,
@@ -391,12 +395,12 @@ export class ThreatDetectionService {
   private calculateConfidence(
     pattern: ThreatPattern,
     match: RegExpExecArray,
-    input: string
+    input: string,
+    threatIndicatorCount: number
   ): number {
     let confidence = pattern.baseConfidence;
 
     // Boost confidence if multiple threat indicators
-    const threatIndicatorCount = this.patterns.filter(p => p.pattern.test(input)).length;
     if (threatIndicatorCount > 1) {
       confidence = Math.min(confidence + 0.05 * (threatIndicatorCount - 1), 0.99);
     }

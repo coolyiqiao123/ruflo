@@ -196,7 +196,8 @@ class StdioMcpClient {
       try {
         const msg = JSON.parse(trimmed);
         if (msg.id && this.pending.has(msg.id)) {
-          const { resolve } = this.pending.get(msg.id);
+          const { resolve, timer } = this.pending.get(msg.id);
+          clearTimeout(timer);
           this.pending.delete(msg.id);
           resolve(msg.result || msg.error || {});
         }
@@ -211,9 +212,10 @@ class StdioMcpClient {
       }
       const id = randomUUID();
       const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
-      this.pending.set(id, { resolve, reject });
+      const entry = { resolve, reject };
+      this.pending.set(id, entry);
       this.process.stdin.write(msg);
-      setTimeout(() => {
+      entry.timer = setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
           reject(new Error(`${this.name} timeout for ${method}`));
@@ -261,6 +263,7 @@ const BACKEND_DEFS = [
 
 const mcpBackends = new Map();
 let allBackendTools = []; // all tools from all backends (pre-filter)
+let toolIndex = new Map();
 
 function isBackendNeeded(backendDef) {
   return backendDef.groups.some(g => TOOL_GROUPS[g]?.enabled);
@@ -312,6 +315,7 @@ async function initBackends() {
   );
 
   allBackendTools = getActiveTools();
+  toolIndex = new Map(allBackendTools.map(t => [t.name, t]));
   console.log(`MCP backends: ${mcpBackends.size} active, ${allBackendTools.length} tools (filtered by groups)`);
 }
 
@@ -803,8 +807,7 @@ async function executeTool(name, args) {
 
     default: {
       // Route to external MCP backend
-      const activeTools = getActiveTools();
-      const extTool = activeTools.find(t => t.name === name);
+      const extTool = toolIndex.get(name) ?? getActiveTools().find(t => t.name === name);
       if (extTool) {
         const backend = mcpBackends.get(extTool._backend);
         if (backend) return backend.callTool(extTool._originalName, args);
@@ -1601,12 +1604,11 @@ app.post("/chat/completions", async (req, res) => {
 
     if (req.body?.stream && upstream.body) {
       const reader = upstream.body.getReader();
-      const decoder = new TextDecoder();
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          res.write(decoder.decode(value, { stream: true }));
+          res.write(value);
         }
       } catch (e) { /* stream closed */ }
       finally { res.end(); }

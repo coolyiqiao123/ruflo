@@ -783,8 +783,11 @@ export class MultiModelRouter extends EventEmitter {
     request: RoutingRequest,
     candidates: ModelConfig[]
   ): RoutingResult | null {
+    const inputTokens = this.estimateTokens(
+      request.messages.map(m => m.content).join(' ')
+    );
     for (const rule of this.config.rules || []) {
-      const matches = this.matchesRule(request, rule);
+      const matches = this.matchesRule(request, rule, inputTokens);
       if (matches) {
         const model = candidates.find(m =>
           m.provider === rule.action.provider &&
@@ -796,7 +799,7 @@ export class MultiModelRouter extends EventEmitter {
             provider: model.provider,
             model: model.id,
             reason: `Matched rule: ${rule.name}`,
-            estimatedCost: this.estimateCost(request, model),
+            estimatedCost: this.estimateCost(request, model, inputTokens),
             estimatedLatency: model.latencyMs,
             qualityScore: model.qualityScore,
           };
@@ -806,7 +809,7 @@ export class MultiModelRouter extends EventEmitter {
     return null;
   }
 
-  private matchesRule(request: RoutingRequest, rule: RoutingRule): boolean {
+  private matchesRule(request: RoutingRequest, rule: RoutingRule, tokens: number): boolean {
     const cond = rule.condition;
 
     if (cond.taskPattern) {
@@ -819,9 +822,6 @@ export class MultiModelRouter extends EventEmitter {
     if (cond.requiresTools && !request.requiredCapabilities?.supportsTools) return false;
     if (cond.requiresVision && !request.requiredCapabilities?.supportsVision) return false;
 
-    const tokens = this.estimateTokens(
-      request.messages.map(m => m.content).join(' ')
-    );
     if (cond.minTokens && tokens < cond.minTokens) return false;
     if (cond.maxTokens && tokens > cond.maxTokens) return false;
 
@@ -837,10 +837,13 @@ export class MultiModelRouter extends EventEmitter {
     estimatedCost: number;
   }> {
     const weights = this.config.routing;
+    const inputTokens = this.estimateTokens(
+      request.messages.map(m => m.content).join(' ')
+    );
 
     return candidates
       .map(model => {
-        const estimatedCost = this.estimateCost(request, model);
+        const estimatedCost = this.estimateCost(request, model, inputTokens);
 
         // Check constraints
         if (request.maxCost && estimatedCost > request.maxCost) return null;
@@ -904,8 +907,12 @@ export class MultiModelRouter extends EventEmitter {
       .sort((a, b) => b.score - a.score);
   }
 
-  private estimateCost(request: RoutingRequest, model: ModelConfig): number {
-    const inputTokens = this.estimateTokens(
+  private estimateCost(
+    request: RoutingRequest,
+    model: ModelConfig,
+    precomputedInputTokens?: number
+  ): number {
+    const inputTokens = precomputedInputTokens ?? this.estimateTokens(
       request.messages.map(m => m.content).join(' ')
     );
     const outputTokens = Math.min(inputTokens * 0.5, model.capabilities.maxOutputTokens);

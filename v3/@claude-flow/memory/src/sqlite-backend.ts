@@ -86,6 +86,14 @@ export class SQLiteBackend extends EventEmitter implements IMemoryBackend {
   /** Whether the FTS5 virtual table is available on this build. */
   private ftsAvailable: boolean = false;
 
+  // Cached prepared statements (lazily prepared, reset on shutdown)
+  private insertEntryStmt: Database.Statement | null = null;
+  private insertEmbeddingStmt: Database.Statement | null = null;
+  private deleteEntryStmt: Database.Statement | null = null;
+  private deleteEmbeddingStmt: Database.Statement | null = null;
+  private ftsDeleteStmt: Database.Statement | null = null;
+  private ftsInsertStmt: Database.Statement | null = null;
+
   // Performance tracking
   private stats = {
     queryCount: 0,
@@ -153,6 +161,12 @@ export class SQLiteBackend extends EventEmitter implements IMemoryBackend {
 
     this.db.close();
     this.db = null;
+    this.insertEntryStmt = null;
+    this.insertEmbeddingStmt = null;
+    this.deleteEntryStmt = null;
+    this.deleteEmbeddingStmt = null;
+    this.ftsDeleteStmt = null;
+    this.ftsInsertStmt = null;
     this.initialized = false;
     this.emit('shutdown');
   }
@@ -164,13 +178,13 @@ export class SQLiteBackend extends EventEmitter implements IMemoryBackend {
     this.ensureInitialized();
     const startTime = performance.now();
 
-    const stmt = this.db!.prepare(`
+    const stmt = (this.insertEntryStmt ??= this.db!.prepare(`
       INSERT OR REPLACE INTO memory_entries (
         id, key, content, type, namespace, tags, metadata,
         owner_id, access_level, created_at, updated_at, expires_at,
         version, "references", access_count, last_accessed_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    `));
 
     stmt.run(
       entry.id,
@@ -193,18 +207,19 @@ export class SQLiteBackend extends EventEmitter implements IMemoryBackend {
 
     // Store embedding separately (as BLOB)
     if (entry.embedding) {
-      const embeddingStmt = this.db!.prepare(`
+      const embeddingStmt = (this.insertEmbeddingStmt ??= this.db!.prepare(`
         INSERT OR REPLACE INTO memory_embeddings (entry_id, embedding)
         VALUES (?, ?)
-      `);
+      `));
       embeddingStmt.run(entry.id, Buffer.from(entry.embedding.buffer));
     }
 
     // ADR-125 Phase 5 — mirror into FTS5 for keyword search.
     if (this.ftsAvailable) {
       // REPLACE semantics for FTS: delete-then-insert so updates reflect.
-      this.db!.prepare('DELETE FROM memory_fts WHERE id = ?').run(entry.id);
-      this.db!.prepare('INSERT INTO memory_fts(id, content) VALUES (?, ?)')
+      (this.ftsDeleteStmt ??= this.db!.prepare('DELETE FROM memory_fts WHERE id = ?'))
+        .run(entry.id);
+      (this.ftsInsertStmt ??= this.db!.prepare('INSERT INTO memory_fts(id, content) VALUES (?, ?)'))
         .run(entry.id, entry.content);
     }
 
@@ -281,13 +296,15 @@ export class SQLiteBackend extends EventEmitter implements IMemoryBackend {
   async delete(id: string): Promise<boolean> {
     this.ensureInitialized();
 
-    const deleteEntry = this.db!.prepare('DELETE FROM memory_entries WHERE id = ?');
-    const deleteEmbedding = this.db!.prepare('DELETE FROM memory_embeddings WHERE entry_id = ?');
+    const deleteEntry = (this.deleteEntryStmt ??=
+      this.db!.prepare('DELETE FROM memory_entries WHERE id = ?'));
+    const deleteEmbedding = (this.deleteEmbeddingStmt ??=
+      this.db!.prepare('DELETE FROM memory_embeddings WHERE entry_id = ?'));
 
     const result = deleteEntry.run(id);
     deleteEmbedding.run(id);
     if (this.ftsAvailable) {
-      this.db!.prepare('DELETE FROM memory_fts WHERE id = ?').run(id);
+      (this.ftsDeleteStmt ??= this.db!.prepare('DELETE FROM memory_fts WHERE id = ?')).run(id);
     }
 
     if (result.changes > 0) {
@@ -781,13 +798,13 @@ export class SQLiteBackend extends EventEmitter implements IMemoryBackend {
    * Synchronous store for use in transactions
    */
   private storeSync(entry: MemoryEntry): void {
-    const stmt = this.db!.prepare(`
+    const stmt = (this.insertEntryStmt ??= this.db!.prepare(`
       INSERT OR REPLACE INTO memory_entries (
         id, key, content, type, namespace, tags, metadata,
         owner_id, access_level, created_at, updated_at, expires_at,
         version, "references", access_count, last_accessed_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    `));
 
     stmt.run(
       entry.id,
@@ -809,10 +826,10 @@ export class SQLiteBackend extends EventEmitter implements IMemoryBackend {
     );
 
     if (entry.embedding) {
-      const embeddingStmt = this.db!.prepare(`
+      const embeddingStmt = (this.insertEmbeddingStmt ??= this.db!.prepare(`
         INSERT OR REPLACE INTO memory_embeddings (entry_id, embedding)
         VALUES (?, ?)
-      `);
+      `));
       embeddingStmt.run(entry.id, Buffer.from(entry.embedding.buffer));
     }
   }
